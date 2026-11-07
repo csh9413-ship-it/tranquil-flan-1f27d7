@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>우리집 스케줄러</title>
+<meta name="theme-color" content="#FFD84D" />
+<link rel="apple-touch-icon" href="icon.png" />
+<link rel="icon" href="icon.png" />
+<link rel="manifest" href="manifest.json" />
+<style>
+  html, body { margin: 0; padding: 0; background: #FBF7EE; -webkit-text-size-adjust: 100%; }
+  #root { min-height: 100vh; }
+</style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script>
+    window.CONFIG = {
+      url: "https://nupwapuefksogrezkibk.supabase.co",
+      anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51cHdhcHVlZmtzb2dyZXpraWJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyNDg2NDMsImV4cCI6MjA5OTgyNDY0M30.KaNdaKJhHi5KdSgqBacS_meLj0tXDb7jbeEWv2xWxtE"
+    };
+  </script>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app.js"></script>
+</body>
+</html>

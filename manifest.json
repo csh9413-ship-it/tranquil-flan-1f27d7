@@ -1,0 +1,12 @@
+{
+  "name": "우리집 스케줄러",
+  "short_name": "스케줄러",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#FBF7EE",
+  "theme_color": "#FFD84D",
+  "icons": [
+    { "src": "icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" },
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
