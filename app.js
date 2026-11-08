@@ -57,6 +57,7 @@ const FACES = ['🐰', '🐻', '🐯', '🐼', '🦊', '🐨', '🐸', '🦁', '
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const CONFIG_KEY = 'family:config';
 const PHOTOS_KEY = 'family:photos';
+const WALLET_KEY = 'family:wallet';
 const logKey = ym => `family:log:${ym}`;
 const uid = () => Math.random().toString(36).slice(2, 9);
 
@@ -172,12 +173,18 @@ const CSS = `
 .row[data-done="true"] .stamp { opacity:.82; transform:rotate(-14deg) scale(1); }
 .stroke { height:18px; background:#EDE7D8; border-radius:999px; overflow:hidden; border:2px solid #23303F; }
 .stroke i { display:block; height:100%; transition:width .45s cubic-bezier(.2,1.3,.4,1); }
-.inp { border:2px solid #23303F; border-radius:8px; background:#FFFDF7; padding:8px 10px; font-family:'Gothic A1',sans-serif; font-size:14px; color:#23303F; outline:none; width:100%; }
+.inp { border:2px solid #23303F; border-radius:8px; background:#FFFDF7; padding:8px 10px; font-family:'Gothic A1',sans-serif; font-size:14px; color:#23303F; outline:none; width:100%; box-sizing:border-box; min-width:0; }
 .btn { font-family:'Jua',sans-serif; font-size:14px; border:2px solid #23303F; background:#FFD84D; color:#23303F; border-radius:999px; padding:8px 16px; cursor:pointer; box-shadow:2px 2px 0 #23303F; }
 .btn:active { transform:translate(2px,2px); box-shadow:none; }
 .btn.ghost { background:#FFFDF7; }
 .btn.tiny { padding:4px 10px; font-size:12px; background:#FFFDF7; box-shadow:none; border-color:#DED6C2; color:#7A8492; }
 button:focus-visible, .inp:focus-visible { outline:3px solid #7FD9C4; outline-offset:2px; }
+.fab { position:fixed; right:18px; bottom:calc(18px + env(safe-area-inset-bottom)); width:60px; height:60px; border-radius:50%; border:2.5px solid #23303F; background:#FFD84D; box-shadow:3px 3px 0 #23303F; font-family:'Jua',sans-serif; font-size:34px; line-height:1; color:#23303F; cursor:pointer; z-index:9; }
+.fab:active { transform:translate(3px,3px); box-shadow:none; }
+.lbl { font-size:11px; letter-spacing:2px; color:#8C8570; display:block; margin-bottom:6px; }
+.krow { border:2px solid #E4DBC4; border-radius:10px; padding:10px; margin-bottom:8px; }
+.krow[data-on="true"] { border-color:#23303F; }
+.linkbtn { background:none; border:none; padding:4px 0; font-size:12px; color:#5A6472; text-decoration:underline; cursor:pointer; font-family:'Gothic A1',sans-serif; }
 .cal { display:grid; grid-template-columns:repeat(7,1fr); gap:5px; }
 .cell { aspect-ratio:1; border:2px solid #E4DBC4; border-radius:8px; display:grid; place-items:center; font-size:11px; position:relative; overflow:hidden; background:#FFFDF7; }
 .cell .fill { position:absolute; left:0; right:0; bottom:0; }
@@ -195,6 +202,7 @@ function App() {
   const [kidId, setKidId] = useState(null);
   const [cursor, setCursor] = useState(new Date());
   const [photos, setPhotos] = useState({});
+  const [wallet, setWallet] = useState({});
   const [err, setErr] = useState('');
   const today = new Date();
   const tKey = dateKey(today);
@@ -216,6 +224,10 @@ function App() {
         const r = await box.get(PHOTOS_KEY);
         if (r?.value) setPhotos(JSON.parse(r.value));
       } catch (e) {/* 아직 올린 사진이 없음 */}
+      try {
+        const r = await box.get(WALLET_KEY);
+        if (r?.value) setWallet(JSON.parse(r.value));
+      } catch (e) {/* 아직 용돈 기록이 없음 */}
       try {
         const r = await box.get(logKey(tMonth));
         if (r?.value) setLogs({
@@ -240,7 +252,7 @@ function App() {
         v = p.new?.value;
       if (!k || v == null) return;
       try {
-        if (k === CONFIG_KEY) setCfg(JSON.parse(v));else if (k === PHOTOS_KEY) setPhotos(JSON.parse(v));else if (k.startsWith('family:log:')) setLogs(prev => ({
+        if (k === CONFIG_KEY) setCfg(JSON.parse(v));else if (k === PHOTOS_KEY) setPhotos(JSON.parse(v));else if (k === WALLET_KEY) setWallet(JSON.parse(v));else if (k.startsWith('family:log:')) setLogs(prev => ({
           ...prev,
           [k.slice(11)]: JSON.parse(v)
         }));
@@ -278,6 +290,15 @@ function App() {
     }
     setErr('저장이 안 됐어요. 잠시 후 다시 눌러주세요.');
   };
+  const saveWallet = async next => {
+    setWallet(next);
+    setErr('');
+    try {
+      await box.set(WALLET_KEY, JSON.stringify(next));
+    } catch (e) {
+      setErr('용돈 기록 저장이 안 됐어요. 인터넷 확인 후 다시 해주세요.');
+    }
+  };
   const savePhotos = async next => {
     setPhotos(next);
     try {
@@ -286,7 +307,28 @@ function App() {
       setErr('사진 저장이 안 됐어요. 조금 더 작은 사진으로 해보세요.');
     }
   };
-  const tasksFor = (kid, date) => (cfg?.tasks ?? []).filter(t => (t.kids === 'all' || t.kids.includes(kid)) && (t.date ? t.date === dateKey(date) : t.days.includes(date.getDay()))).sort((a, b) => (a.time || '99').localeCompare(b.time || '99'));
+  const tasksFor = (kid, date) => (cfg?.tasks ?? []).flatMap(t => {
+    // 아이·요일별 시간표가 있는 할 일: 그 아이의 그 요일 칸에 시간이 있을 때만 보인다
+    if (t.sched && !t.date) {
+      const tm = t.sched[kid]?.[date.getDay()];
+      return tm == null ? [] : [{
+        ...t,
+        time: tm
+      }];
+    }
+    const hit = (t.kids === 'all' || t.kids.includes(kid)) && (t.date ? t.date === dateKey(date) : t.days.includes(date.getDay()));
+    return hit ? [t] : [];
+  }).sort((a, b) => (a.time || '99').localeCompare(b.time || '99'));
+  const [adding, setAdding] = useState(false);
+  const [detail, setDetail] = useState(null);
+  const [unlocked, setUnlocked] = useState(false);
+  const saveTaskApp = t => {
+    const exists = cfg.tasks.some(x => x.id === t.id);
+    saveCfg({
+      ...cfg,
+      tasks: exists ? cfg.tasks.map(x => x.id === t.id ? t : x) : [...cfg.tasks, t]
+    });
+  };
   const doneList = (dk, kid) => logs[dk.slice(0, 7)]?.[dk]?.[kid] ?? [];
 
   // 아무 아이·아무 날짜나 체크할 수 있는 범용 토글 (대시보드에서 사용)
@@ -365,7 +407,7 @@ function App() {
       marginBottom: 14,
       flexWrap: 'wrap'
     }
-  }, [['home', '종합'], ['today', '오늘'], ['record', '기록'], ['setup', '설정']].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+  }, [['home', '종합'], ['today', '오늘'], ['record', '기록'], ['wallet', '용돈'], ['setup', '설정']].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
     key: k,
     className: "tab",
     "data-on": tab === k,
@@ -420,13 +462,49 @@ function App() {
     },
     tasksFor: tasksFor,
     today: today
+  }), tab === 'wallet' && /*#__PURE__*/React.createElement(Wallet, {
+    cfg: cfg,
+    kid: kid,
+    wallet: wallet,
+    save: saveWallet,
+    logs: logs,
+    today: today,
+    ensureMonth: loadMonth
   }), tab === 'setup' && /*#__PURE__*/React.createElement(Setup, {
     cfg: cfg,
     save: saveCfg,
     photos: photos,
     savePhotos: savePhotos,
     setErr: setErr
-  })));
+  })), tab !== 'setup' && tab !== 'wallet' && !adding && !detail && /*#__PURE__*/React.createElement("button", {
+    className: "fab",
+    "aria-label": "\uD560 \uC77C \uBC14\uB85C \uCD94\uAC00",
+    onClick: () => setAdding(true)
+  }, "+"), adding && /*#__PURE__*/React.createElement(QuickAdd, {
+    cfg: cfg,
+    kidId: kidId,
+    today: today,
+    unlocked: unlocked,
+    onUnlock: () => setUnlocked(true),
+    onClose: () => setAdding(false),
+    onSave: t => {
+      saveTaskApp(t);
+      setAdding(false);
+    },
+    onDetail: t => {
+      setAdding(false);
+      setDetail(t);
+    }
+  }), detail && /*#__PURE__*/React.createElement(TaskEditor, {
+    task: detail,
+    kids: cfg.kids,
+    onSave: t => {
+      saveTaskApp(t);
+      setDetail(null);
+    },
+    onDelete: () => setDetail(null),
+    onCancel: () => setDetail(null)
+  }));
 }
 
 // 입력이 멈춘 뒤에만 저장한다 (글자마다 저장하면 서버 제한에 걸림)
@@ -1300,9 +1378,22 @@ function Setup({
   const delKid = id => save({
     ...cfg,
     kids: cfg.kids.filter(k => k.id !== id),
-    tasks: cfg.tasks.map(t => t.kids === 'all' ? t : {
-      ...t,
-      kids: t.kids.filter(x => x !== id)
+    tasks: cfg.tasks.map(t => {
+      let n = t.kids === 'all' ? t : {
+        ...t,
+        kids: t.kids.filter(x => x !== id)
+      };
+      if (n.sched && n.sched[id]) {
+        const sched = {
+          ...n.sched
+        };
+        delete sched[id];
+        n = {
+          ...n,
+          sched
+        };
+      }
+      return n;
     })
   });
   const saveTask = t => {
@@ -1440,7 +1531,7 @@ function Setup({
       fontSize: 11,
       color: '#7A8492'
     }
-  }, t.days.length === 7 ? '매일' : t.days.map(d => DOW[d]).join(''), " ", t.time, " ", t.reward > 0 ? `· ${t.reward.toLocaleString()}원` : ''), /*#__PURE__*/React.createElement("button", {
+  }, t.sched ? schedSummary(t, cfg.kids) : (t.days.length === 7 ? '매일' : t.days.map(d => DOW[d]).join('')) + " " + t.time, " ", t.reward > 0 ? `· ${t.reward.toLocaleString()}원` : ''), /*#__PURE__*/React.createElement("button", {
     className: "btn tiny",
     onClick: () => setEditing(t)
   }, "\uC218\uC815")))), /*#__PURE__*/React.createElement("button", {
@@ -1633,6 +1724,47 @@ function TaskEditor({
     days: t.days.includes(d) ? t.days.filter(x => x !== d) : [...t.days, d].sort()
   });
   const allOn = t.kids === 'all';
+  const each = !!t.sched && !t.date;
+  const setEach = on => {
+    if (on) {
+      // 지금 정한 요일·시간·아이로 시간표를 미리 채워둔다
+      const sched = {};
+      const ids = allOn ? kids.map(k => k.id) : t.kids;
+      ids.forEach(id => {
+        sched[id] = {};
+        t.days.forEach(d => {
+          sched[id][d] = t.time || '';
+        });
+      });
+      setT({
+        ...t,
+        sched
+      });
+    } else {
+      const next = {
+        ...t
+      };
+      delete next.sched;
+      setT(next);
+    }
+  };
+  const finish = x => {
+    if (!x.sched || x.date) return x;
+    // 예전 화면과 호환되도록 요일·아이 목록도 함께 맞춰 둔다
+    const sched = {};
+    Object.entries(x.sched).forEach(([id, m]) => {
+      if (kids.some(k => k.id === id) && Object.keys(m).length) sched[id] = m;
+    });
+    const days = [...new Set(Object.values(sched).flatMap(m => Object.keys(m).map(Number)))].sort();
+    const times = Object.values(sched).flatMap(m => Object.values(m)).filter(Boolean).sort();
+    return {
+      ...x,
+      sched,
+      days,
+      kids: Object.keys(sched),
+      time: times[0] || ''
+    };
+  };
   const toggleKid = id => {
     const cur = allOn ? kids.map(k => k.id) : t.kids;
     const next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id];
@@ -1686,13 +1818,40 @@ function TaskEditor({
     style: {
       marginBottom: 14
     }
-  }), /*#__PURE__*/React.createElement("label", {
+  }), !t.date && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    "data-on": !each,
+    onClick: () => setEach(false),
+    style: {
+      flex: 1
+    }
+  }, "\uBAA8\uB450 \uAC19\uC544\uC694"), /*#__PURE__*/React.createElement("button", {
+    className: "chip",
+    "data-on": each,
+    onClick: () => setEach(true),
+    style: {
+      flex: 1
+    }
+  }, "\uC544\uC774\uB9C8\uB2E4 \uB2EC\uB77C\uC694")), each && /*#__PURE__*/React.createElement(SchedEditor, {
+    kids: kids,
+    sched: t.sched,
+    setSched: sched => setT({
+      ...t,
+      sched
+    })
+  }), !each && /*#__PURE__*/React.createElement("label", {
     style: {
       fontSize: 11,
       letterSpacing: 2,
       color: '#8C8570'
     }
-  }, "\uC2DC\uAC04 (\uC5C6\uC5B4\uB3C4 \uB3FC\uC694)"), /*#__PURE__*/React.createElement("input", {
+  }, "\uC2DC\uAC04 (\uC5C6\uC5B4\uB3C4 \uB3FC\uC694)"), !each && /*#__PURE__*/React.createElement("input", {
     className: "inp",
     type: "time",
     value: t.time,
@@ -1739,7 +1898,7 @@ function TaskEditor({
     style: {
       marginBottom: 14
     }
-  })) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", {
+  })) : each ? null : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", {
     style: {
       fontSize: 11,
       letterSpacing: 2,
@@ -1762,7 +1921,7 @@ function TaskEditor({
       padding: '5px 0',
       flex: 1
     }
-  }, d)))), /*#__PURE__*/React.createElement("label", {
+  }, d)))), !each && /*#__PURE__*/React.createElement("label", {
     style: {
       fontSize: 11,
       letterSpacing: 2,
@@ -1770,7 +1929,7 @@ function TaskEditor({
       display: 'block',
       marginBottom: 6
     }
-  }, "\uB204\uAD6C \uAC83"), /*#__PURE__*/React.createElement("div", {
+  }, "\uB204\uAD6C \uAC83"), !each && /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 6,
@@ -1796,10 +1955,10 @@ function TaskEditor({
     style: {
       flex: '1 1 120px'
     },
-    onClick: () => t.title.trim() && onSave({
+    onClick: () => t.title.trim() && onSave(finish({
       ...t,
       title: t.title.trim()
-    })
+    }))
   }, "\uC800\uC7A5"), /*#__PURE__*/React.createElement("button", {
     className: "btn ghost",
     onClick: onCancel
@@ -1807,6 +1966,652 @@ function TaskEditor({
     className: "btn tiny",
     onClick: () => onDelete(t.id)
   }, "\uC0AD\uC81C"))));
+}
+
+// 아이·요일별 시간표를 한 줄로 요약 (예: "첫째 월수 16:00 / 둘째 화목 17:00")
+function schedSummary(t, kids) {
+  return kids.filter(k => t.sched?.[k.id] && Object.keys(t.sched[k.id]).length).map(k => {
+    const m = t.sched[k.id];
+    const ds = Object.keys(m).map(Number).sort();
+    const times = new Set(ds.map(d => m[d]));
+    if (times.size > 1) return k.name + ' ' + ds.map(d => DOW[d] + (m[d] || '')).join(',');
+    return k.name + ' ' + (ds.length === 7 ? '매일' : ds.map(d => DOW[d]).join('')) + (m[ds[0]] ? ' ' + m[ds[0]] : '');
+  }).join(' / ');
+}
+const h = React.createElement;
+
+// 아이마다 요일·시간을 따로 정하는 표
+function SchedEditor({
+  kids,
+  sched,
+  setSched
+}) {
+  const valsOf = id => Object.values(sched[id] || {});
+  const [open, setOpen] = useState(() => Object.fromEntries(kids.map(k => [k.id, new Set(valsOf(k.id)).size > 1])));
+  const [base, setBase] = useState(() => Object.fromEntries(kids.map(k => [k.id, valsOf(k.id).find(Boolean) || ''])));
+  const upKid = (id, m) => setSched({
+    ...sched,
+    [id]: m
+  });
+  const toggleDay = (id, d) => {
+    const m = {
+      ...(sched[id] || {})
+    };
+    if (d in m) delete m[d];else m[d] = base[id] || '';
+    upKid(id, m);
+  };
+  const setAll = (id, tm) => {
+    setBase({
+      ...base,
+      [id]: tm
+    });
+    const m = {};
+    Object.keys(sched[id] || {}).forEach(d => {
+      m[d] = tm;
+    });
+    upKid(id, m);
+  };
+  const setOne = (id, d, tm) => upKid(id, {
+    ...sched[id],
+    [d]: tm
+  });
+  return h("div", {
+    style: {
+      marginBottom: 14
+    }
+  }, h("span", {
+    className: "lbl"
+  }, "아이별 요일 \xB7 시간 (안 다니는 아이는 비워두세요)"), kids.map((k, idx) => {
+    const m = sched[k.id] || {};
+    const ds = Object.keys(m).map(Number).sort();
+    const isOpen = open[k.id];
+    return h("div", {
+      key: k.id,
+      className: "krow",
+      "data-on": ds.length > 0
+    }, h("div", {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 8
+      }
+    }, h("i", {
+      style: {
+        width: 12,
+        height: 12,
+        borderRadius: '50%',
+        background: k.color,
+        border: '2px solid #23303F',
+        flex: 'none'
+      }
+    }), h("span", {
+      className: "display",
+      style: {
+        flex: 1,
+        fontSize: 16
+      }
+    }, k.name), !isOpen && h("input", {
+      className: "inp",
+      type: "time",
+      value: base[k.id] || '',
+      onChange: e => setAll(k.id, e.target.value),
+      style: {
+        width: 120,
+        padding: '5px 8px'
+      }
+    })), h("div", {
+      style: {
+        display: 'flex',
+        gap: 4
+      }
+    }, DOW.map((d, i) => h("button", {
+      key: d,
+      className: "chip",
+      "data-on": i in m,
+      onClick: () => toggleDay(k.id, i),
+      style: {
+        padding: '5px 0',
+        flex: 1
+      }
+    }, d))), isOpen && ds.map(d => h("div", {
+      key: d,
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        marginTop: 6
+      }
+    }, h("span", {
+      className: "display",
+      style: {
+        width: 24
+      }
+    }, DOW[d]), h("input", {
+      className: "inp",
+      type: "time",
+      value: m[d] || '',
+      onChange: e => setOne(k.id, d, e.target.value),
+      style: {
+        padding: '5px 8px'
+      }
+    }))), h("div", {
+      style: {
+        display: 'flex',
+        gap: 14,
+        marginTop: 4
+      }
+    }, h("button", {
+      className: "linkbtn",
+      onClick: () => {
+        if (isOpen) setAll(k.id, base[k.id] || valsOf(k.id).find(Boolean) || '');
+        setOpen({
+          ...open,
+          [k.id]: !isOpen
+        });
+      }
+    }, isOpen ? '시간 하나로 맞추기' : '요일마다 시간이 달라요'), idx > 0 && h("button", {
+      className: "linkbtn",
+      onClick: () => {
+        const src = kids[idx - 1].id;
+        upKid(k.id, {
+          ...(sched[src] || {})
+        });
+        setBase({
+          ...base,
+          [k.id]: base[src]
+        });
+        setOpen({
+          ...open,
+          [k.id]: open[src]
+        });
+      }
+    }, '↑ ' + kids[idx - 1].name + '와 같게')));
+  }));
+}
+
+// 설정에 들어가지 않고 어디서든 바로 할 일을 추가하는 창
+function QuickAdd({
+  cfg,
+  kidId,
+  today,
+  unlocked,
+  onUnlock,
+  onClose,
+  onSave,
+  onDetail
+}) {
+  const [title, setTitle] = useState('');
+  const [who, setWho] = useState(kidId ? [kidId] : cfg.kids.map(k => k.id));
+  const [when, setWhen] = useState('today');
+  const [days, setDays] = useState([today.getDay()]);
+  const [time, setTime] = useState('');
+  const [pin, setPin] = useState('');
+  const [msg, setMsg] = useState('');
+  const needPin = cfg.pin && !unlocked;
+  const build = () => {
+    const base = {
+      id: uid(),
+      title: title.trim(),
+      time,
+      reward: 0,
+      kids: who.length === cfg.kids.length ? 'all' : who
+    };
+    return when === 'today' ? {
+      ...base,
+      days: [],
+      date: dateKey(today)
+    } : {
+      ...base,
+      days
+    };
+  };
+  const submit = () => {
+    if (!title.trim()) return setMsg('무엇을 할지 적어주세요.');
+    if (!who.length) return setMsg('누가 할지 골라주세요.');
+    if (when === 'weekly' && !days.length) return setMsg('요일을 하나 이상 골라주세요.');
+    onSave(build());
+  };
+  const checkPin = () => {
+    if (pin === cfg.pin) onUnlock();else {
+      setMsg('비밀번호가 달라요.');
+      setPin('');
+    }
+  };
+  const toggle = (arr, set, v) => set(arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v].sort());
+  return h("div", {
+    onClick: e => e.target === e.currentTarget && onClose(),
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(35,48,63,0.45)',
+      display: 'flex',
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+      padding: 10,
+      zIndex: 10
+    }
+  }, h("div", {
+    className: "card pop",
+    style: {
+      padding: 18,
+      width: '100%',
+      maxWidth: 420,
+      maxHeight: 'calc(100vh - 20px)',
+      overflowY: 'auto',
+      marginBottom: 'env(safe-area-inset-bottom)'
+    }
+  }, h("h3", {
+    className: "display",
+    style: {
+      fontSize: 24,
+      margin: '0 0 12px'
+    }
+  }, "바로 추가"), needPin ? h(React.Fragment, null, h("span", {
+    className: "lbl"
+  }, "비밀번호 4자리"), h("input", {
+    className: "inp",
+    type: "password",
+    inputMode: "numeric",
+    maxLength: 4,
+    autoFocus: true,
+    value: pin,
+    onChange: e => setPin(e.target.value.replace(/\D/g, '')),
+    onKeyDown: e => e.key === 'Enter' && checkPin(),
+    style: {
+      marginBottom: 12,
+      fontSize: 22,
+      letterSpacing: 8,
+      textAlign: 'center'
+    }
+  }), h("div", {
+    style: {
+      display: 'flex',
+      gap: 8
+    }
+  }, h("button", {
+    className: "btn",
+    onClick: checkPin
+  }, "열기"), h("button", {
+    className: "btn ghost",
+    onClick: onClose
+  }, "취소"))) : h(React.Fragment, null, h("span", {
+    className: "lbl"
+  }, "무엇을?"), h("input", {
+    className: "inp",
+    autoFocus: true,
+    value: title,
+    placeholder: "예: 합기도, 치과, 수학 숙제",
+    onChange: e => setTitle(e.target.value),
+    onKeyDown: e => e.key === 'Enter' && submit(),
+    style: {
+      marginBottom: 14
+    }
+  }), h("span", {
+    className: "lbl"
+  }, "누가?"), h("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap',
+      marginBottom: 14
+    }
+  }, cfg.kids.map(k => h("button", {
+    key: k.id,
+    className: "chip",
+    "data-on": who.includes(k.id),
+    onClick: () => toggle(who, setWho, k.id),
+    style: {
+      borderLeft: `6px solid ${k.color}`
+    }
+  }, k.name))), h("span", {
+    className: "lbl"
+  }, "언제?"), h("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      marginBottom: 8
+    }
+  }, h("button", {
+    className: "chip",
+    "data-on": when === 'today',
+    onClick: () => setWhen('today'),
+    style: {
+      flex: 1
+    }
+  }, "오늘만"), h("button", {
+    className: "chip",
+    "data-on": when === 'weekly',
+    onClick: () => setWhen('weekly'),
+    style: {
+      flex: 1
+    }
+  }, "매주 반복")), when === 'weekly' && h("div", {
+    style: {
+      display: 'flex',
+      gap: 4,
+      marginBottom: 8
+    }
+  }, DOW.map((d, i) => h("button", {
+    key: d,
+    className: "chip",
+    "data-on": days.includes(i),
+    onClick: () => toggle(days, setDays, i),
+    style: {
+      padding: '5px 0',
+      flex: 1
+    }
+  }, d))), h("span", {
+    className: "lbl",
+    style: {
+      marginTop: 6
+    }
+  }, "시간 (없어도 돼요)"), h("input", {
+    className: "inp",
+    type: "time",
+    value: time,
+    onChange: e => setTime(e.target.value),
+    style: {
+      marginBottom: 14
+    }
+  }), msg && h("p", {
+    style: {
+      fontSize: 13,
+      color: '#D6483B',
+      margin: '0 0 10px'
+    }
+  }, msg), h("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap',
+      alignItems: 'center'
+    }
+  }, h("button", {
+    className: "btn",
+    style: {
+      flex: '1 1 100px'
+    },
+    onClick: submit
+  }, "추가"), h("button", {
+    className: "btn ghost",
+    onClick: onClose
+  }, "취소")), h("button", {
+    className: "linkbtn",
+    style: {
+      marginTop: 10
+    },
+    onClick: () => {
+      const t = build();
+      delete t.date;
+      t.days = when === 'today' ? [today.getDay()] : days;
+      // 고른 아이·요일·시간으로 아이별 시간표를 채워서 연다
+      t.sched = Object.fromEntries((who.length ? who : cfg.kids.map(k => k.id)).map(id => [id, Object.fromEntries(t.days.map(d => [d, time]))]));
+      onDetail(t);
+    }
+  }, "아이마다 요일\xB7시간이 달라요 / 용돈 정하기 →"))));
+}
+
+// 아이별 용돈기입장. 데이터 모양: { [아이id]: [{ id, date, amt(+들어옴/-씀), memo, mission?: 'YYYY-MM' }] }
+function Wallet({
+  cfg,
+  kid,
+  wallet,
+  save,
+  logs,
+  today,
+  ensureMonth
+}) {
+  const [sign, setSign] = useState(1);
+  const [amt, setAmt] = useState('');
+  const [memo, setMemo] = useState('');
+  const [date, setDate] = useState(dateKey(today));
+  const [msg, setMsg] = useState('');
+  const thisYm = monthKey(today);
+  const prevYm = monthKey(new Date(today.getFullYear(), today.getMonth() - 1, 1));
+  useEffect(() => {
+    ensureMonth(prevYm);
+  }, []);
+  const list = wallet[kid.id] ?? [];
+  const sorted = [...list].sort((a, b) => b.date.localeCompare(a.date) || (b.ts || 0) - (a.ts || 0));
+  const balance = list.reduce((s, e) => s + e.amt, 0);
+  const price = Object.fromEntries(cfg.tasks.map(t => [t.id, t.reward || 0]));
+  const earnedIn = ym => {
+    let sum = 0;
+    for (const byKid of Object.values(logs[ym] ?? {})) for (const id of byKid[kid.id] ?? []) sum += price[id] ?? 0;
+    return sum;
+  };
+  const paidIn = ym => list.filter(e => e.mission === ym).reduce((s, e) => s + e.amt, 0);
+  const put = entries => save({
+    ...wallet,
+    [kid.id]: entries
+  });
+  const add = () => {
+    const n = Math.round(Number(String(amt).replace(/[^\d]/g, '')));
+    if (!n) return setMsg('금액을 적어주세요.');
+    put([...list, {
+      id: uid(),
+      date,
+      amt: sign * n,
+      memo: memo.trim() || (sign > 0 ? '받은 돈' : '쓴 돈'),
+      ts: Date.now()
+    }]);
+    setAmt('');
+    setMemo('');
+    setMsg('');
+  };
+  const settle = ym => {
+    const diff = earnedIn(ym) - paidIn(ym);
+    if (diff <= 0) return;
+    put([...list, {
+      id: uid(),
+      date: ym === thisYm ? dateKey(today) : ym + '-' + pad(new Date(+ym.slice(0, 4), +ym.slice(5), 0).getDate()),
+      amt: diff,
+      memo: `${+ym.slice(5)}월 미션 용돈`,
+      mission: ym,
+      ts: Date.now()
+    }]);
+  };
+  const del = e => {
+    if (confirm(`"${e.memo}" ${Math.abs(e.amt).toLocaleString()}원 기록을 지울까요?`)) put(list.filter(x => x.id !== e.id));
+  };
+  const monthIn = list.filter(e => e.date.startsWith(thisYm) && e.amt > 0).reduce((s, e) => s + e.amt, 0);
+  const monthOut = list.filter(e => e.date.startsWith(thisYm) && e.amt < 0).reduce((s, e) => s - e.amt, 0);
+  let lastYm = '';
+  return h(React.Fragment, null, h("div", {
+    className: "card",
+    style: {
+      padding: 16,
+      marginBottom: 12,
+      textAlign: 'center'
+    }
+  }, h("i", {
+    className: "tape"
+  }), h("p", {
+    className: "hand",
+    style: {
+      fontSize: 17,
+      color: '#8C8570',
+      margin: 0
+    }
+  }, kid.name, "의 지갑"), h("p", {
+    className: "display",
+    style: {
+      fontSize: 40,
+      margin: '2px 0 6px',
+      color: balance < 0 ? '#D6483B' : '#23303F'
+    }
+  }, balance.toLocaleString(), "원"), h("p", {
+    style: {
+      fontSize: 13,
+      color: '#5A6472',
+      margin: 0
+    }
+  }, "이번 달 들어온 돈 ", h("b", null, monthIn.toLocaleString(), "원"), " \xB7 쓴 돈 ", h("b", null, monthOut.toLocaleString(), "원"))), [prevYm, thisYm].map(ym => {
+    const earned = earnedIn(ym);
+    const left = earned - paidIn(ym);
+    if (earned <= 0) return null;
+    return h("div", {
+      key: ym,
+      className: "card",
+      style: {
+        padding: 12,
+        marginBottom: 12,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10
+      }
+    }, h("span", {
+      style: {
+        fontSize: 26
+      }
+    }, "🏅"), h("span", {
+      style: {
+        flex: 1,
+        fontSize: 14
+      }
+    }, +ym.slice(5), "월 미션으로 번 용돈 ", h("b", null, earned.toLocaleString(), "원"), left > 0 ? '' : ' · 기입장에 넣었어요'), left > 0 && h("button", {
+      className: "btn",
+      onClick: () => settle(ym)
+    }, left.toLocaleString(), "원 넣기"));
+  }), h("div", {
+    className: "card",
+    style: {
+      padding: 14,
+      marginBottom: 12
+    }
+  }, h("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      marginBottom: 10
+    }
+  }, h("button", {
+    className: "chip",
+    "data-on": sign > 0,
+    onClick: () => setSign(1),
+    style: {
+      flex: 1,
+      fontSize: 15
+    }
+  }, "💰 들어온 돈"), h("button", {
+    className: "chip",
+    "data-on": sign < 0,
+    onClick: () => setSign(-1),
+    style: {
+      flex: 1,
+      fontSize: 15
+    }
+  }, "🛒 쓴 돈")), h("input", {
+    className: "inp",
+    inputMode: "numeric",
+    placeholder: "얼마? (원)",
+    value: amt ? Number(String(amt).replace(/[^\d]/g, '')).toLocaleString() : '',
+    onChange: e => setAmt(e.target.value.replace(/[^\d]/g, '')),
+    style: {
+      marginBottom: 6,
+      fontSize: 18
+    }
+  }), h("div", {
+    style: {
+      display: 'flex',
+      gap: 5,
+      marginBottom: 10,
+      flexWrap: 'wrap'
+    }
+  }, [500, 1000, 5000, 10000].map(v => h("button", {
+    key: v,
+    className: "btn tiny",
+    onClick: () => setAmt(String((Number(amt) || 0) + v))
+  }, "+", v.toLocaleString()))), h("input", {
+    className: "inp",
+    placeholder: sign > 0 ? '어디서? 예: 할머니 용돈, 세뱃돈' : '어디에? 예: 과자, 문구점',
+    value: memo,
+    onChange: e => setMemo(e.target.value),
+    onKeyDown: e => e.key === 'Enter' && add(),
+    style: {
+      marginBottom: 6
+    }
+  }), h("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      alignItems: 'center'
+    }
+  }, h("input", {
+    className: "inp",
+    type: "date",
+    value: date,
+    onChange: e => setDate(e.target.value || dateKey(today)),
+    style: {
+      flex: 1
+    }
+  }), h("button", {
+    className: "btn",
+    onClick: add
+  }, "적기")), msg && h("p", {
+    style: {
+      fontSize: 13,
+      color: '#D6483B',
+      margin: '8px 0 0'
+    }
+  }, msg)), h("div", {
+    className: "card",
+    style: {
+      padding: '6px 14px'
+    }
+  }, sorted.length === 0 && h("p", {
+    style: {
+      padding: 18,
+      textAlign: 'center',
+      color: '#7A8492',
+      fontSize: 14,
+      margin: 0
+    }
+  }, "아직 기록이 없어요. 첫 용돈을 적어보세요!"), sorted.map(e => {
+    const ym = e.date.slice(0, 7);
+    const head = ym !== lastYm;
+    lastYm = ym;
+    return h(React.Fragment, {
+      key: e.id
+    }, head && h("p", {
+      className: "display",
+      style: {
+        fontSize: 16,
+        margin: '12px 0 2px',
+        color: '#8C8570'
+      }
+    }, ym.slice(0, 4), "년 ", +ym.slice(5), "월"), h("div", {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '9px 0',
+        borderBottom: '1px dashed #DED6C2'
+      }
+    }, h("span", {
+      style: {
+        fontSize: 12,
+        color: '#7A8492',
+        width: 34
+      }
+    }, +e.date.slice(5, 7), "/", +e.date.slice(8)), h("span", {
+      style: {
+        flex: 1,
+        fontSize: 14
+      }
+    }, e.mission ? '🏅 ' : '', e.memo), h("b", {
+      className: "display",
+      style: {
+        fontSize: 17,
+        color: e.amt > 0 ? '#1E8A6E' : '#D6483B'
+      }
+    }, e.amt > 0 ? '+' : '−', Math.abs(e.amt).toLocaleString()), h("button", {
+      className: "btn tiny",
+      "aria-label": "지우기",
+      onClick: () => del(e)
+    }, "✕")));
+  })));
 }
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(React.createElement(App));
